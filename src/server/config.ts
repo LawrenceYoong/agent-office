@@ -7,6 +7,29 @@ import { WEATHERS, type Weather } from '../shared/protocol.js';
 import { AGENT_PROVIDERS, PROVIDER_META } from '../shared/providers.js';
 import { MAX_WORKER_LIMIT, parseWorkerLimit } from './machine.js';
 
+// Load a .env file into process.env (without overwriting values already set). Searched in cwd and
+// the AGENT_OFFICE_ENV_FILE path. Secrets live here, never in start.sh or git.
+function loadEnv() {
+  const candidates = [process.env.AGENT_OFFICE_ENV_FILE, path.resolve(process.cwd(), '.env')].filter(Boolean) as string[];
+  for (const file of candidates) {
+    if (!existsSync(file)) continue;
+    let text = '';
+    try { text = readFileSync(file, 'utf8'); } catch { continue; }
+    for (const raw of text.split(/\r?\n/)) {
+      const line = raw.trim();
+      if (!line || line.startsWith('#')) continue;
+      const eq = line.indexOf('=');
+      if (eq < 0) continue;
+      const key = line.slice(0, eq).trim();
+      if (!key || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;
+      let val = line.slice(eq + 1).trim();
+      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) val = val.slice(1, -1);
+      if (process.env[key] === undefined) process.env[key] = val;
+    }
+  }
+}
+loadEnv();
+
 export interface Config {
   /** The office's own folder: the building's data lives in its .agent-office. */
   dir: string;
@@ -55,6 +78,16 @@ export interface Config {
   maxWorkers?: number;
   /** Slack / Discord webhook to post to when a worker needs input or finishes ('' turns it off). */
   webhook?: string;
+  /** Telegram bot token (env TELEGRAM_BOT_TOKEN). */
+  telegramBotToken?: string;
+  /** Telegram webhook secret token (env TELEGRAM_WEBHOOK_SECRET). */
+  telegramWebhookSecret?: string;
+  /** Owner's Telegram chat id (env TELEGRAM_OWNER_CHAT_ID). */
+  telegramOwnerChatId?: string;
+  /** Shared secret between gateway and agents (env TELEGRAM_GATEWAY_SECRET). */
+  telegramGatewaySecret?: string;
+  /** Public URL Telegram posts updates to (env TELEGRAM_WEBHOOK_URL). */
+  telegramWebhookUrl?: string;
   /** Where the office is: its sun and live weather follow this city's forecast. */
   city?: string;
   /** Weather pinned for good, instead of made up or forecast. */
@@ -238,6 +271,11 @@ export function loadConfig(argv: string[]): Config {
   let budgetPause = !!process.env.AGENT_OFFICE_BUDGET_PAUSE && process.env.AGENT_OFFICE_BUDGET_PAUSE !== '0';
   let maxWorkers = process.env.AGENT_OFFICE_MAX_WORKERS || '';
   let webhook = process.env.AGENT_OFFICE_WEBHOOK;
+  let telegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
+  let telegramWebhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
+  let telegramOwnerChatId = process.env.TELEGRAM_OWNER_CHAT_ID;
+  let telegramGatewaySecret = process.env.TELEGRAM_GATEWAY_SECRET;
+  let telegramWebhookUrl = process.env.TELEGRAM_WEBHOOK_URL;
   let city = process.env.AGENT_OFFICE_CITY || '';
   let weather = process.env.AGENT_OFFICE_WEATHER || '';
   let realTimeSky = process.env.AGENT_OFFICE_SKY_CLOCK === 'real';
@@ -460,6 +498,11 @@ export function loadConfig(argv: string[]): Config {
     budgetPause,
     maxWorkers: workerLimit,
     webhook,
+    telegramBotToken: telegramBotToken || undefined,
+    telegramWebhookSecret: telegramWebhookSecret || undefined,
+    telegramOwnerChatId: telegramOwnerChatId || undefined,
+    telegramGatewaySecret: telegramGatewaySecret || undefined,
+    telegramWebhookUrl: telegramWebhookUrl || undefined,
     city: city.trim() || undefined,
     weather: (weather as Weather) || undefined,
     realTimeSky,

@@ -9,6 +9,7 @@ import { githubRoutes } from './github.js';
 import { pageRoutes } from './pages.js';
 import { searchRoutes } from './search.js';
 import { serviceRoutes } from './services.js';
+import { telegramRoutes } from './telegram.js';
 
 export const routes: readonly Route[] = [
   // Anyone.
@@ -35,6 +36,15 @@ export const routes: readonly Route[] = [
   fileRoutes.docs,
   searchRoutes.search,
   serviceRoutes.forwards,
+  telegramRoutes.webhook,
+  telegramRoutes.send,
+  telegramRoutes.subscribe,
+  telegramRoutes.unsubscribe,
+  telegramRoutes.activate,
+  telegramRoutes.inbox,
+  telegramRoutes.reply,
+  telegramRoutes.setup,
+  telegramRoutes.status,
   githubRoutes.github,
   pageRoutes.office,
   pageRoutes.lite,

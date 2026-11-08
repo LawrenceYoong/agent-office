@@ -10,6 +10,7 @@ import { ImageProxy } from '../decor.js';
 import { Ledger } from '../usage.js';
 import { PlanLimitsReader } from '../limits.js';
 import { Webhook } from '../webhook.js';
+import { TelegramGateway } from '../telegram.js';
 import { Machine } from '../machine.js';
 import type { Floor } from '../floor.js';
 import { Sky } from '../sky.js';
@@ -98,6 +99,13 @@ export function createServices(ctx: Ctx): BuildingServices {
 
   // Slack / Discord pings for workers that need input or finish (set from ⚙️ Settings or --webhook).
   const webhook = new Webhook(cfg.dataDir, (workerId) => (workerId && ctx.workerFloor(workerId)?.def.name) || ctx.officeName, (state) => ctx.broadcast({ t: 'notify', state }));
+  const telegram = new TelegramGateway({ botToken: cfg.telegramBotToken, webhookSecret: cfg.telegramWebhookSecret, ownerChatId: cfg.telegramOwnerChatId, gatewaySecret: cfg.telegramGatewaySecret, dataDir: cfg.dataDir, webhookUrl: cfg.telegramWebhookUrl });
+  const officeCallbackUrl = cfg.publicHost ? 'https://' + cfg.publicHost + '/api/telegram/reply' : (cfg.tailnet ? 'https://' + cfg.tailnet + '/api/telegram/reply' : undefined);
+  telegram.subscribe('agent-office', officeCallbackUrl);
+  telegram.activate('agent-office');
+  telegram.onReply((agentId, msg) => { try { ctx.toastAll('Telegram reply (' + agentId + '): ' + msg.text, 'info'); } catch { /* no clients */ } });
+  const poller = setInterval(() => { try { telegram.drain('agent-office'); } catch { /* ignore */ } }, 5000);
+  poller.unref();
   if (cfg.webhook !== undefined) {
     const err = webhook.set(cfg.webhook, 'the command line');
     if (err) console.error(`agent-office: --webhook: ${err}`);
@@ -125,7 +133,7 @@ export function createServices(ctx: Ctx): BuildingServices {
     });
   };
 
-  return { sky, themes, maps, prompts, leaveOnMerge, ledger, signins, limits, accountLimits, webhook, machine, limitsOf, pumpQueues };
+  return { sky, themes, maps, prompts, leaveOnMerge, ledger, signins, limits, accountLimits, webhook, telegram, machine, limitsOf, pumpQueues };
 }
 
 /** What's made once the floors are open: the SSH team, the tailnet, workers' web servers, pictures and upgrades. */

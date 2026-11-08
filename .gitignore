@@ -5,3 +5,19 @@ dist
 .DS_Store
 pw.txt
 __pycache__/
+
+# Local runtime scripts, state and personal notes (not for the repo)
+agent-office.pid
+check.sh
+runfg.sh
+start.sh
+stop.sh
+docker/
+docs/personal-customization.md
+
+AGENTS.md
+
+# Secrets (loaded by src/server/config.ts)
+.env
+.env.local
+.env.*.local
