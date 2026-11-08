@@ -42,11 +42,13 @@ export const routes: readonly Route[] = [
   telegramRoutes.unsubscribe,
   telegramRoutes.activate,
   telegramRoutes.inbox,
+  telegramRoutes.miniappAuth,
   telegramRoutes.reply,
   telegramRoutes.setup,
   telegramRoutes.status,
   githubRoutes.github,
   pageRoutes.office,
   pageRoutes.lite,
+  pageRoutes.miniapp,
   pageRoutes.bundle,
 ];

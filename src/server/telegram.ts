@@ -1,6 +1,7 @@
 // Telegram gateway: one bot for every project, sending to the owner and routing their replies
 // back to whichever agent is listening. Credentials come from the environment (never from git).
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHmac } from 'node:crypto';
 import path from 'node:path';
 
 export interface TelegramConfig {
@@ -147,6 +148,26 @@ export class TelegramGateway {
 
   activeListener(): string | null {
     return this.state.active;
+  }
+
+  /** Verify Telegram Mini App initData. Returns the user id on success. */
+  verifyInitData(initData: string): { ok: boolean; userId?: number; error?: string } {
+    if (!this.cfg.botToken) return { ok: false, error: 'not configured' };
+    const params = new URLSearchParams(initData);
+    const hash = params.get('hash');
+    if (!hash) return { ok: false, error: 'no hash' };
+    params.delete('hash');
+    const keys = [...params.keys()].sort();
+    const dataCheckString = keys.map((k) => `${k}=${params.get(k)}`).join('\n');
+    const secretKey = createHmac('sha256', 'WebAppData').update(this.cfg.botToken).digest();
+    const computed = createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
+    if (computed !== hash) return { ok: false, error: 'bad hash' };
+    const authDate = Number(params.get('auth_date'));
+    if (!authDate || Date.now() / 1000 - authDate > 3600) return { ok: false, error: 'expired' };
+    let user: any;
+    try { user = JSON.parse(params.get('user') ?? ''); } catch { return { ok: false, error: 'bad user' }; }
+    if (!user || String(user.id) !== String(this.cfg.ownerChatId)) return { ok: false, error: 'not owner' };
+    return { ok: true, userId: user.id };
   }
 
   onReply(cb: (agentId: string, msg: TelegramInboxMessage) => void): void {

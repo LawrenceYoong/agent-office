@@ -7,6 +7,8 @@ import type { Ctx } from '../../office/context.js';
 
 /** One of the bundle's own pages, never cached, so a new version is picked up at once. */
 const page = (name: string) => (ctx: Ctx, { res }: RouteRequest) => serveFile(res, path.join(ctx.publicDir, name), false);
+/** Same, but frameable (for Telegram Mini Apps, which load in an iframe on desktop). */
+const pageFrameable = (name: string) => (ctx: Ctx, { res }: RouteRequest) => serveFile(res, path.join(ctx.publicDir, name), false, true);
 
 export const pageRoutes = {
   health: { path: '/api/health', auth: 'public', handle: (_ctx, { res }) => send(res, 200, { ok: true }) },
@@ -26,6 +28,7 @@ export const pageRoutes = {
   office: { path: ['/', '/index.html'], auth: 'session', handle: page('index.html') },
   // The 2D view: the workers, their terminals and the boards, without the 3D office (lite.ts).
   lite: { path: ['/lite', '/lite.html'], auth: 'session', handle: page('lite.html') },
+  miniapp: { path: ['/miniapp', '/miniapp.html'], auth: 'public', handle: pageFrameable('miniapp.html') },
   /** Anything else in the bundle; last, since it answers every path. */
   bundle: {
     prefix: '/',

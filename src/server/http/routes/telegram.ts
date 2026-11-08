@@ -1,6 +1,6 @@
 // Telegram gateway routes: a public webhook Telegram calls, plus agent/owner endpoints.
 import type { Ctx } from '../../office/context.js';
-import { send } from '../util.js';
+import { isSecure, send } from '../util.js';
 import type { Route } from '../router.js';
 
 function authorized(ctx: Ctx, req: import('node:http').IncomingMessage): boolean {
@@ -141,6 +141,22 @@ export const telegramRoutes = {
       // Surface the reply to everyone in the office.
       try { ctx.toastAll(`Telegram reply (${agentId}): ${msg.text ?? ''}`, 'info'); } catch { /* no clients */ }
       return send(res, 200, { ok: true });
+    },
+  },
+  // Telegram Mini App auto-login: verifies initData, issues a session cookie.
+  miniappAuth: {
+    method: 'POST',
+    path: '/api/telegram/miniapp-auth',
+    auth: 'public',
+    handle: async (ctx, { req, res }) => {
+      const chunks: Buffer[] = [];
+      for await (const c of req) chunks.push(c as Buffer);
+      let body: any;
+      try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { return send(res, 400, { error: 'bad json' }); }
+      const r = ctx.telegram.verifyInitData(String(body?.initData ?? ''));
+      if (!r.ok) return send(res, 401, { error: r.error ?? 'invalid' });
+      const token = ctx.auth.issue();
+      return send(res, 200, { ok: true, userId: r.userId }, { 'set-cookie': ctx.auth.cookie(req, token, isSecure(req, ctx.cfg)) });
     },
   },
   status: {

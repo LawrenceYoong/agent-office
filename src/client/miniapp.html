@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Agent Office</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+      body { margin: 0; font-family: system-ui, sans-serif; background: #1e1f2e; color: #e9ecef;
+             display: flex; align-items: center; justify-content: center; height: 100vh; }
+      .card { text-align: center; padding: 24px; }
+      .spinner { width: 32px; height: 32px; border: 3px solid #444; border-top-color: #7cf29a;
+                 border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      .err { color: #ff8a5b; margin-top: 12px; font-size: 14px; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="spinner" id="spin"></div>
+      <div id="msg">Signing in…</div>
+      <div class="err" id="err"></div>
+    </div>
+    <script type="module" src="./miniapp.ts"></script>
+  </body>
+</html>
