@@ -188,16 +188,17 @@ export function installArrival(ctx: Ctx, core: CoreState, parts: ArrivalParts) {
     if (!p) {
       $('project-name').textContent = '🏢 Agent Office';
       $('project-meta').textContent = store.floors.length ? '🛗 Take the elevator to a floor' : '🛗 No floors yet — add a project in the elevator';
-      // Where to go next, so it shows even with the floor details turned off.
       $('project-meta').classList.add('lobby');
       ctx.world().setProjectName(store.floors.length ? 'Pick a floor' : 'Lobby');
       return;
     }
-    const n = store.floors.findIndex((f) => f.id === store.floor);
+    const f = store.floors.find((o) => o.id === store.floor);
+    const name = f?.name ?? p.name;
+    const n = f ? store.floors.findIndex((o) => o.id === f.id) : -1;
     $('project-meta').classList.remove('lobby');
-    $('project-name').textContent = `🏢 ${p.name}`;
+    $('project-name').textContent = `🏢 ${name}`;
     $('project-meta').textContent = [n >= 0 && `🛗 floor ${n + 1} of ${store.floors.length}`, p.branch && `⎇ ${p.branch}`, p.dir, `default: ${providerLabel(p.defaultProvider, p)}`].filter(Boolean).join(' · ');
-    ctx.world().setProjectName(p.name);
+    ctx.world().setProjectName(name);
   }
   store.on('floors', renderProject);
   store.on('project', renderProject);

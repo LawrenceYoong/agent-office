@@ -165,7 +165,7 @@ export function openElevator(opts: ElevatorOptions): void {
     return btn;
   };
 
-  /** The floor's button, with a 🗑 beside it for admins to take it off the building (⏹ to stop it while it's cloned). */
+  /** The floor's button, with admin actions: ✏️ rename, 🗑 remove (⏹ stop while cloning). */
   const floorRow = (f: FloorInfo, i: number) => {
     const btn = floorButton(f, i);
     if (f.cloning) {
@@ -175,9 +175,11 @@ export function openElevator(opts: ElevatorOptions): void {
       return h('div.floor-row', {}, btn, stop);
     }
     if (!store.me.admin) return btn;
+    const rename = h('button.btn.floor-off', { type: 'button', title: `Rename ${f.name}`, 'aria-label': `Rename ${f.name}` }, '✏️');
+    rename.addEventListener('click', () => renameFloor(f));
     const off = h('button.btn.floor-off', { type: 'button', title: `Take ${f.name} off the building`, 'aria-label': `Remove ${f.name}` }, '🗑');
     off.addEventListener('click', () => confirmRemove(f));
-    return h('div.floor-row', {}, btn, off);
+    return h('div.floor-row', {}, btn, rename, off);
   };
 
   const confirmRemove = (f: FloorInfo) => {
@@ -187,6 +189,37 @@ export function openElevator(opts: ElevatorOptions): void {
     // The office was started in it: its accounts, password and chat live in that .agent-office too, and stay.
     const own = f.local ? ' The office keeps its own settings there too, so it carries on as before, just without this floor.' : '';
     confirmDialog(`Take ${f.name} off the building?`, `${workers}${people}Nothing is deleted: its checkout stays in ${f.dir}, .agent-office folder and all.${own}`, '🗑 Remove floor', () => net.send({ t: 'floor.remove', floor: f.id }));
+  };
+
+  const renameFloor = (f: FloorInfo) => {
+    const input = h('input', { type: 'text', value: f.name, 'aria-label': 'Floor name', maxlength: '100', autocomplete: 'off', spellcheck: 'false' }) as HTMLInputElement;
+    const yes = h('button.btn.primary', { type: 'button' }, 'Rename');
+    const no = h('button.btn', { type: 'button' }, 'Cancel');
+    const form = h(
+      'form.modal',
+      { role: 'dialog', 'aria-label': `Rename ${f.name}` },
+      h('header', {}, h('h2', {}, '✏️ Rename floor')),
+      h('div.body', {}, h('label', { style: 'display:flex;flex-direction:column;gap:6px;font-weight:700' }, `Name for ${f.name}`, input)),
+      h('footer', {}, no, yes),
+    ) as HTMLFormElement;
+    form.noValidate = true;
+    const modal = openModal(form);
+    const submit = () => {
+      const name = input.value.trim();
+      if (!name) return input.focus();
+      modal.close();
+      net.send({ t: 'floor.rename', floor: f.id, name });
+    };
+    no.addEventListener('click', () => modal.close());
+    yes.addEventListener('click', submit);
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      submit();
+    });
+    setTimeout(() => {
+      input.focus();
+      input.select();
+    }, 30);
   };
 
   /** The roof, over every floor: the rooftop bar. */

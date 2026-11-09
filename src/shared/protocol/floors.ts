@@ -143,6 +143,8 @@ export type FloorClientMsg =
   | { t: 'floor.cancel'; floor: string }
   /** Take a floor off the building (admins only). Its checkout stays on disk; everyone on it rides to another floor. */
   | { t: 'floor.remove'; floor: string }
+  /** Rename a floor (admins, or whoever added it). */
+  | { t: 'floor.rename'; floor: string; name: string }
   /** Where new floors are cloned from now on (admins only); '' goes back to the default. */
   | { t: 'floor.projectsDir'; dir: string };
 

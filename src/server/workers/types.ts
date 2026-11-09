@@ -95,6 +95,8 @@ export interface Worker {
   interrupted?: boolean;
   /** A prompt its start couldn't pass on the command line (a Muse resume): typed into its session after SessionStart. */
   pendingPrompt?: string;
+  /** Recent terminal input, to detect commands like /clear submitted in the PTY. */
+  inputTail?: string;
   /** Output since its scrollback was last saved to disk. */
   unsaved?: boolean;
   /** Where this run's own output starts, below the scrollback carried over from before. */

@@ -458,25 +458,33 @@ export class WorkerManager {
   write(id: string, data: string, by: string) {
     const w = this.workers.get(id);
     if (!w) return;
-    if (w.dsh) {
-      // ACP has no terminal: the session buffers these into a line and submits it on Enter.
-      w.dsh.writeInput(data);
+    const onInput = () => {
       let changed = this.typed(w, by);
-      if (w.info.status === 'needs_input' && w.info.acked === false) {
-        w.info.acked = true;
-        changed = true;
-      }
+      if (w.info.status === 'needs_input' && w.info.acked === false) { w.info.acked = true; changed = true; }
+      if (w.info.kind === 'agent' && this.detectClear(w, data)) changed = true;
       if (changed) this.emitUpdate(w);
+    };
+    if (w.dsh) {
+      w.dsh.writeInput(data);
+      onInput();
       return;
     }
     if (!w.pty) return;
     w.pty.write(data);
-    let changed = this.typed(w, by);
-    if (w.info.status === 'needs_input' && w.info.acked === false) {
-      w.info.acked = true;
-      changed = true;
-    }
-    if (changed) this.emitUpdate(w);
+    onInput();
+  }
+
+  /** /clear typed in the terminal: reset the worker's displayed task/result to placeholder. */
+  private detectClear(w: Worker, data: string): boolean {
+    const plain = data.replace(/\x1b\[[0-9;]*[A-Za-z~]/g, '').replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, '');
+    w.inputTail = ((w.inputTail ?? '') + plain).slice(-48);
+    if (!/(?:^|[\r\n])\s*\/clear\s*[\r\n]+$/.test(w.inputTail)) return false;
+    console.log(`  ${w.info.name}: /clear detected in terminal, resetting to placeholder`);
+    w.inputTail = '';
+    this.tasks.clear(w);
+    w.info.lastInput = undefined;
+    if (w.info.status === 'done' || w.info.status === 'needs_input') this.setStatus(w, 'idle');
+    return true;
   }
 
   /** Keeps a file dropped or pasted into a worker's terminal on this machine; where it is, for the terminal to type. */

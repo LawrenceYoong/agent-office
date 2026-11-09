@@ -81,6 +81,23 @@ export const floorHandlers = {
     if (floor) ctx.closeFloor(floor, who);
     else ctx.floorsChanged();
   },
+  'floor.rename'(ctx, c, msg) {
+    const who = c.peer.name;
+    if (!ctx.meOf(c.accountId).admin) return ctx.warn(c, 'Only admins can rename a floor');
+    const id = str(msg.floor, 64);
+    const name = str(msg.name, 100);
+    const floor = ctx.floors.get(id);
+    const old = floor?.def.name ?? ctx.building.list().find((d) => d.id === id)?.name ?? ctx.building.pending().find((d) => d.id === id)?.name;
+    const r = ctx.building.rename(id, name);
+    if (typeof r === 'string') return ctx.warn(c, r);
+    if (floor) {
+      (floor as any).def.name = r.name;
+      if ((floor as any).project) (floor as any).project.name = r.name;
+    }
+    ctx.floorsChanged();
+    console.log(`  ${who} renamed floor ${id} from "${old}" to "${r.name}"`);
+    ctx.toastAll(`🛗 ${who} renamed "${old}" to "${r.name}"`);
+  },
   'floor.projectsDir'(ctx, c, msg) {
     const who = c.peer.name;
     // It's a folder on the office's machine that `gh` writes into: admins pick it.
