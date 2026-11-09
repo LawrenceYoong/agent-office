@@ -12,7 +12,7 @@
 |---|---|---|---|
 | 批准/駁回 | `approve` | 兩個按鈕（可自訂文字） | `action: approve/reject`, `value` |
 | 單選 | `pick` | 多個選項選 1 個 | `action: pick`, `value: <option.key>` |
-| 多選後送出 | `multi` | 勾選多項 → 送出/取消（會即時更新訊息按鈕） | `action: submit/cancel`, `selected: [...]` |
+| 多選後送出 | `multi` | 勾選多項 → 送出/取消（會即時更新訊息按鈕）；支援 `__all__` 全選切換 | `action: submit/cancel`, `selected: [...]`（實際選取項，不含 `__all__`） |
 
 所有請求都帶 `decision_id`（短 id）與可選的 `correlation_id`/`metadata`（原樣回傳），方便對應你專案內的單據/任務。
 
@@ -105,6 +105,8 @@ curl -sS -X POST "$BASE_URL/api/telegram/decisions" \
 ```
 
 owner 點選項目時，訊息按鈕會即時切換 `☑/☐`；按「送出」才會回傳結果。
+
+若要提供「全選/取消全選」，可加入特殊選項 `{ "key": "__all__", "label": "全選" }`（key 固定為 `__all__`）。點擊 `__all__` 會切換所有非 `__all__` 選項的勾選狀態；送出時 `selected` 只包含實際選取的選項 key（不包含 `__all__`）。
 
 ### 欄位說明
 
@@ -298,7 +300,7 @@ app.post('/hooks/telegram-decision', (req, res) => {
 - **冪等處理**：callback 可能因網路重送而重複；用 `decision_id`/`correlation_id` 做去重，重複結果不重複執行副作用。
 - **逾時與降級**：設合理 `timeout_sec`；逾時狀態為 `expired`。若專案沒有公開 `callback_url`，用輪詢。
 - **`options[].key` 保持穩定且短**：結果依 `key` 分支（不要依顯示文字分支）；`key` 會進 Telegram `callback_data`（受 64 bytes 限制，API 已做基本處理）。
-- **多選（multi）** 是「切換再送出」：需要 owner 按送出才會 resolve；中途切換由 agent-office 即時更新按鈕。
+- **多選（multi）** 是「切換再送出」：需要 owner 按送出才會 resolve；中途切換由 agent-office 即時更新按鈕。可加入 `{ "key": "__all__", "label": "全選" }` 提供全選切換；`__all__` 是 UI 控制鍵，結果 `selected` 會展開為實際選取項。
 - **破壞性操作**：批准/駁回只代表「owner 同意/拒絕」，專案端仍應在執行前做自身驗證（備份/權限/環境），不要把 Telegram 按鈕當成唯一安全閘門。
 
 ## 低階 gateway 原語（進階）
