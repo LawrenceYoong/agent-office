@@ -222,9 +222,14 @@ export const telegramRoutes = {
         const parts = sub.split('/').filter(Boolean);
         const id = parts[0];
         if (method === 'POST' && parts[1] === 'cancel') return send(res, 200, ctx.telegramDecisions.cancel(id));
+        if (method === 'POST' && (parts[1] === 'resolve' || parts[1] === 'submit')) {
+          const body = await readJson(req);
+          if (!body) return send(res, 400, { error: 'bad json' });
+          return send(res, 200, ctx.telegramDecisions.resolveAction(id, body, 'office-ui'));
+        }
         if (method === 'GET') return send(res, 200, ctx.telegramDecisions.get(id));
       }
-      return send(res, 405, { error: '用法: POST /api/telegram/decisions | GET /api/telegram/decisions?id=<id> | GET /api/telegram/decisions?agent=<agent_id> | POST /api/telegram/decisions/<id>/cancel' });
+      return send(res, 405, { error: '用法: POST /api/telegram/decisions | GET /api/telegram/decisions?id=<id> | GET /api/telegram/decisions?agent=<agent_id> | POST /api/telegram/decisions/<id>/resolve | POST /api/telegram/decisions/<id>/cancel' });
     },
   },
 } satisfies Record<string, Route>;

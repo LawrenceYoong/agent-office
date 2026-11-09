@@ -13,6 +13,7 @@ import type { PresenceClientMsg, PresenceServerMsg } from './protocol/presence.j
 import type { QueueClientMsg, QueueServerMsg } from './protocol/queue.js';
 import type { RooftopClientMsg, RooftopServerMsg } from './protocol/rooftop.js';
 import type { SettingsClientMsg, SettingsServerMsg } from './protocol/settings.js';
+import type { TelegramServerMsg } from './protocol/telegram.js';
 import type { BallClientMsg, CabinetClientMsg, CarClientMsg, DecorClientMsg, DogClientMsg, JukeboxClientMsg, ToysServerMsg, WhiteboardClientMsg } from './protocol/toys.js';
 import type { UsageClientMsg, UsageServerMsg } from './protocol/usage.js';
 import type { WorkerClientMsg, WorkerServerMsg } from './protocol/workers.js';
@@ -27,6 +28,7 @@ export * from './protocol/presence.js';
 export * from './protocol/queue.js';
 export * from './protocol/rooftop.js';
 export * from './protocol/settings.js';
+export * from './protocol/telegram.js';
 export * from './protocol/toys.js';
 export * from './protocol/usage.js';
 export * from './protocol/workers.js';
@@ -61,6 +63,7 @@ export type ServerMsg =
   | GitHubServerMsg
   | QueueServerMsg
   | MeetingServerMsg
+  | TelegramServerMsg
   | FloorServerMsg
   | ChangesServerMsg
   | AccountsServerMsg
