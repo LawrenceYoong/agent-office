@@ -31,10 +31,22 @@
 | 方法 | 路徑 | 用途 |
 |---|---|---|
 | `POST` | `/api/telegram/decisions` | 建立並發送決策請求 |
-| `GET` | `/api/telegram/decisions?id=<decision_id>` | 查詢單筆結果（輪詢用） |
+| `GET` | `/api/telegram/decisions?id=<decision_id>` | 查詢單筆結果（輪詢/同步用） |
 | `GET` | `/api/telegram/decisions?agent=<agent_id>` | 列出某 agent 的決策 |
+| `POST` | `/api/telegram/decisions/<id>/resolve` | 提交決策（**雙通道/UI**；與 Telegram callback 同一 state machine、冪等） |
 | `POST` | `/api/telegram/decisions/<id>/cancel` | 取消待決策 |
 | `POST` | `/api/telegram/edit` | （進階）編輯訊息按鈕/文字，gateway 原語 |
+
+### 雙通道（C3）
+
+同一筆 `decision_id` 可由 **Telegram** 或 **agent-office Office UI** 完成：
+- Telegram：owner 點 inline 按鈕（既有 callback）。
+- Office UI：`POST /api/telegram/decisions/<id>/resolve`，body 例如：
+  - `approve`: `{ "action": "approve" }` / `{ "action": "reject" }`
+  - `pick`: `{ "action": "pick", "value": "<option.key>" }`
+  - `multi`: `{ "action": "submit", "selected": ["key1","key2"] }`（不含 `__all__`）或 `{ "action": "cancel" }`
+- 伺服器會推送 WS `ServerMsg { t:"decision", result }`（同 floor）。UI 應以 WS + `GET ?id=` 輪詢 fallback 同步；若偵測到 `resolved/cancelled/expired`（含另一通道已完成），**自動關閉/同步核准提示**。✕/Esc 僅關閉 UI，不變更決策。
+- `resolve` 為冪等：已完成的 decision 會回傳既有 `result`。
 
 ## 1) 建立決策：`POST /api/telegram/decisions`
 
@@ -302,6 +314,16 @@ app.post('/hooks/telegram-decision', (req, res) => {
 - **`options[].key` 保持穩定且短**：結果依 `key` 分支（不要依顯示文字分支）；`key` 會進 Telegram `callback_data`（受 64 bytes 限制，API 已做基本處理）。
 - **多選（multi）** 是「切換再送出」：需要 owner 按送出才會 resolve；中途切換由 agent-office 即時更新按鈕。可加入 `{ "key": "__all__", "label": "全選" }` 提供全選切換；`__all__` 是 UI 控制鍵，結果 `selected` 會展開為實際選取項。
 - **破壞性操作**：批准/駁回只代表「owner 同意/拒絕」，專案端仍應在執行前做自身驗證（備份/權限/環境），不要把 Telegram 按鈕當成唯一安全閘門。
+
+## Standup / Meeting 整合（C1–C4，v1 flow-first）
+
+- **C1**：`standup` meeting pattern（Report→Synthesize），輸出到專案 repo `docs/todo/<ymdhis>.md`（多次/日、gitignore 友善）；可解析專案 `.agents/skills/<role>/SKILL.md`（DPMS：`product-manager`、`project-manager`、`uiux-manager`）並注入已驗證 context（git branch/head、workers/seats、skill 來源；未驗證須標示）。
+- **C2a**：meeting `done` → 建立 `multi + __all__` 決策（`assign_project_manager`、`assign_uiux_manager`、`ack_scope`），`correlation_id=meeting:<floorId>:<meetingId>`，`metadata.authScope=assign_managers_only`，輪詢模式。`agent_id` 來源（DPMS 預期 `dpms-monitor`）：`AGENT_OFFICE_MONITOR_AGENT_ID` 環境變數 > `<project>/.agent-office/monitor.json` 的 `{"agent_id":"..."}` > 由 floor/repo 名稱推導 `<base>-monitor`。
+- **C3**：Telegram 或 Office UI 任一通道可核准（同 state machine）；UI 偵測他通道完成後自動同步/關閉提示。
+- **C4（idempotent orchestrator）**：`resolved` 且 `authScope=assign_managers_only` 時，依 `selected` **僅指派 managers**（Project Manager / UI/UX Manager）。**不直接指派實作 workers**。狀態持久化於 `<project>/.agent-office/standup-orchestration.json`（依 `decision_id` 冪等）。指派時注入專案角色 skill 與 DPMS 護欄：
+  - managers 可在授權內決定實作分工：總數 ≤ 5、從 manager 分支/worktree 派生、PR→manager 分支、**永不直接 push/merge 到 main**；
+  - 任何 merge 到 main/master/shared 主線需使用者明確授權；
+  - verified > claimed（附可檢查證據；未驗證需標示）。
 
 ## 低階 gateway 原語（進階）
 
