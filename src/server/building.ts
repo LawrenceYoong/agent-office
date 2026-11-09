@@ -93,31 +93,15 @@ export class Building {
   /** That checkout was taken off the building: a restart doesn't put it back. */
   private localOff?: LocalOff;
 
-  constructor(
-    /** The office's own data folder; `gh` runs there, since the projects folder may not exist yet. */
-    private dataDir: string,
-    /** Where new floors are cloned unless another folder was picked. */
-    private defaultProjectsDir: string,
-    private opts: BuildingOptions = {},
-  ) {
-    this.file = path.join(dataDir, 'floors.json');
-    this.clonesFile = path.join(dataDir, 'cloning.json');
-    this.logsDir = path.join(dataDir, 'clones');
-    this.pickedFile = path.join(dataDir, 'projects-folder.json');
+  constructor(private dataDir: string, private defaultProjectsDir: string, private opts: BuildingOptions = {}) {
+    this.file = path.join(dataDir, 'floors.json'); this.clonesFile = path.join(dataDir, 'cloning.json');
+    this.logsDir = path.join(dataDir, 'clones'); this.pickedFile = path.join(dataDir, 'projects-folder.json');
     this.localFile = path.join(dataDir, 'local-floor.json');
-    this.load();
-    this.loadPicked();
-    this.loadLocalOff();
+    this.load(); this.loadPicked(); this.loadLocalOff();
   }
 
-  /** Where new floors are cloned. Floors already there stay where they are when it moves. */
-  get projectsDir(): string {
-    return this.picked?.dir ?? this.defaultProjectsDir;
-  }
-
-  projectsDirState(): ProjectsDirState {
-    return { dir: tildify(this.projectsDir), custom: !!this.picked, by: this.picked?.by, at: this.picked?.at };
-  }
+  get projectsDir(): string { return this.picked?.dir ?? this.defaultProjectsDir; }
+  projectsDirState(): ProjectsDirState { return { dir: tildify(this.projectsDir), custom: !!this.picked, by: this.picked?.by, at: this.picked?.at }; }
 
   /** Clones new floors into `raw` from now on ('~' is the home folder; '' goes back to the default). Returns why it can't, if it can't. */
   setProjectsDir(raw: string, by: string): string | undefined {
@@ -253,9 +237,7 @@ export class Building {
   }
 
   /** The office keeps its own data in this floor's checkout. */
-  isLocal(id: string): boolean {
-    return id === this.localId;
-  }
+  isLocal(id: string): boolean { return id === this.localId; }
 
   /**
    * Takes a floor off the building. Its checkout stays where it is, with its workers, queue and
@@ -275,6 +257,13 @@ export class Building {
     return def;
   }
 
+  rename(id: string, name: string): FloorDef | string {
+    const t = name.trim().slice(0, 100);
+    if (!t) return 'Give the floor a name';
+    const def = this.defs.find((d) => d.id === id);
+    if (!def) return this.pendingFloor(id) ? "That floor is still being cloned — rename it once it's there" : 'No such floor';
+    def.name = t; this.save(); return def;
+  }
   /**
    * Clones a repository into the projects folder and adds it as a floor. `started` hears about the
    * floor as soon as the clone begins; resolves to the finished floor, or to why there's none. A

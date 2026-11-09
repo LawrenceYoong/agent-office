@@ -66,10 +66,10 @@ export class WorkerTasks {
     w.tools = [];
     w.toolsSinceNamed = 0;
     this.namer.forget(w.info.id);
-    if (!w.info.task) return;
+    const had = w.info.task !== undefined || w.info.activity !== undefined;
     w.info.task = undefined;
-    this.ctx.emit(w);
-    this.ctx.persist();
+    w.info.activity = undefined;
+    if (had) { this.ctx.emit(w); this.ctx.persist(); }
   }
 
   /** It's gone: a naming still on its way is dropped. */
