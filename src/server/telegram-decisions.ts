@@ -5,9 +5,10 @@
 
 import { randomBytes } from 'node:crypto';
 import type { TelegramGateway } from './telegram.js';
+import type { DecisionResult, DecisionState } from '../shared/protocol.js';
 
 export type DecisionType = 'approve' | 'pick' | 'multi';
-export type DecisionState = 'pending' | 'resolved' | 'cancelled' | 'expired';
+export type { DecisionResult, DecisionState };
 
 export interface DecisionOption { key: string; label: string }
 export interface DecisionRequest {
@@ -32,26 +33,6 @@ export interface DecisionRequest {
   correlation_id?: string;
   /** 呼叫方自訂資料，原樣回傳 */
   metadata?: unknown;
-}
-
-export interface DecisionResult {
-  type: 'telegram.decision';
-  decision_id: string;
-  agent_id: string;
-  correlation_id?: string;
-  metadata?: unknown;
-  state: DecisionState;
-  action?: string;
-  /** pick 的單一值；approve 為 "approve"/"reject" */
-  value?: string;
-  /** multi 的已選值 */
-  selected?: string[];
-  /** owner 點擊的原始 callback_data */
-  raw?: string;
-  from?: string;
-  at: number;
-  message_id?: number;
-  chat_id?: string | number;
 }
 
 interface Pending {
@@ -202,11 +183,38 @@ export class TelegramDecisions {
   }
 
   cancel(id: string): { ok: boolean; error?: string } {
+    return this.resolveAction(id, { action: 'cancel' }, 'api');
+  }
+
+  /** Office UI/外部（已授權）提交決策；與 Telegram callback 走同一 state machine，冪等。 */
+  resolveAction(id: string, input: { action?: string; value?: string; selected?: string[] }, from = 'office-ui'): { ok: boolean; error?: string; result?: DecisionResult } {
     const p = this.pending.get(id);
     if (!p) return { ok: false, error: '找不到 decision_id' };
-    if (p.state !== 'pending') return { ok: false, error: `目前狀態為 ${p.state}` };
-    this.resolve(p, { state: 'cancelled', action: 'cancel', at: Date.now() });
-    return { ok: true };
+    if (p.state !== 'pending') return { ok: true, result: p.result ?? this.baseResult(p, { state: p.state, at: Date.now() }) };
+    if (p.expiresAt && Date.now() >= p.expiresAt) { this.resolve(p, { state: 'expired', action: 'expired', at: Date.now(), from }); return { ok: true, result: p.result }; }
+    const act = String(input?.action || '');
+    if (act === 'cancel') { this.resolve(p, { state: 'cancelled', action: 'cancel', raw: 'ui:cancel', from, at: Date.now() }); return { ok: true, result: p.result }; }
+    if (p.req.type === 'multi') {
+      if (act !== 'submit') return { ok: false, error: 'multi 請使用 action=submit（可帶 selected）或 cancel' };
+      const norm = this.normalizeOptions(p.req);
+      const allowed = norm.ok ? new Set(norm.options.map(o => o.key).filter(k => !this.isAllKey(k))) : new Set<string>();
+      const sel = Array.isArray(input?.selected) ? input.selected.map(String).filter(k => allowed.has(k) && !this.isAllKey(k)) : [...p.selected].filter(k => !this.isAllKey(k));
+      this.resolve(p, { state: 'resolved', action: 'submit', selected: [...new Set(sel)], raw: 'ui:submit', from, at: Date.now() });
+      return { ok: true, result: p.result };
+    }
+    if (p.req.type === 'approve') {
+      if (act === 'approve' || act === 'ok') { this.resolve(p, { state: 'resolved', action: 'approve', value: input?.value || 'approve', raw: 'ui:approve', from, at: Date.now() }); return { ok: true, result: p.result }; }
+      if (act === 'reject' || act === 'no') { this.resolve(p, { state: 'resolved', action: 'reject', value: input?.value || 'reject', raw: 'ui:reject', from, at: Date.now() }); return { ok: true, result: p.result }; }
+      return { ok: false, error: 'approve 請使用 action=approve/reject/cancel' };
+    }
+    if (act === 'pick') {
+      const val = String(input?.value || '');
+      const norm = this.normalizeOptions(p.req);
+      if (norm.ok && !norm.options.some(o => o.key === val)) return { ok: false, error: 'pick value 不在 options 中' };
+      this.resolve(p, { state: 'resolved', action: 'pick', value: val, raw: 'ui:pick', from, at: Date.now() });
+      return { ok: true, result: p.result };
+    }
+    return { ok: false, error: `不支援的 action: ${act}` };
   }
 
   private baseResult(p: Pending, patch: Partial<DecisionResult>): DecisionResult {

@@ -278,6 +278,11 @@ export class Floor {
         prompt: (id) => ctx.prompts.text(id),
       },
     );
+    // C3: 決策狀態變更（含 Telegram 已核准）→ 推送給同 floor UI，自動關閉/同步
+    ctx.telegramDecisions?.onResolved?.((result) => {
+      const fid = (result.metadata as any)?.floorId;
+      if (fid === this.def.id) ctx.emit(this, { t: 'decision', result } as any);
+    });
 
     // What each worker changed, for the Changes window at its desk (see changes.ts).
     this.changes = new Changes(
@@ -471,8 +476,11 @@ export class Floor {
     };
     try {
       const r = await this.ctx.telegramDecisions?.request(req);
-      if (r?.ok) this.ctx.toast(this, `📣 已發送核准請求（Telegram/輪詢，${agentId}，decision=${r.decision_id}）`, 'info');
-      else if (r) this.ctx.toast(this, `無法發送核准請求：${r.error || 'unknown'}`, 'warn');
+      if (r?.ok) {
+        this.ctx.toast(this, `📣 已發送核准請求（Telegram/輪詢，${agentId}，decision=${r.decision_id}）`, 'info');
+        const dr = this.ctx.telegramDecisions?.get(r.decision_id);
+        if (dr && !(dr as any).error) this.ctx.emit(this, { t: 'decision', result: dr } as any);
+      } else if (r) this.ctx.toast(this, `無法發送核准請求：${r.error || 'unknown'}`, 'warn');
     } catch (e: any) {
       this.ctx.toast(this, `發送核准請求失敗：${e?.message || e}`, 'warn');
     }

@@ -1,6 +1,6 @@
 import './meeting.css';
 import { MEETING_PATTERNS, MEETING_PATTERN_IDS, fixedRounds, meetingSpend, meetingStage, outputProblem, slugify } from '../../shared/meetings';
-import { fmtTokens, type Meeting, type MeetingPattern, type MeetingTurn } from '../../shared/protocol';
+import { fmtTokens, type DecisionResult, type Meeting, type MeetingPattern, type MeetingTurn } from '../../shared/protocol';
 import type { Net } from '../net';
 import { store } from '../state';
 import { h, openModal, timeAgo, toast, STATUS_LABEL, type Modal } from './dom';
@@ -32,12 +32,31 @@ export function issueMeeting(n: number, title: string): MeetingPreset {
 
 const PART_LABEL: Record<MeetingTurn['state'], string> = { waiting: '⏳ up next', sent: '📨 handed over', working: '💬 on it', done: '✅ written' };
 
+type DecisionInfo = { type?: string; text?: string; description?: string; options?: { key: string; label: string }[]; approve_label?: string; reject_label?: string; submit_label?: string; cancel_label?: string };
+type DecisionUi = { selected: Set<string>; forId: string; submitting: boolean; lastState?: string; poll: ReturnType<typeof setInterval> | null };
+
+async function fetchDecision(id: string): Promise<DecisionResult | null> {
+  try {
+    const r = await fetch(`/api/telegram/decisions?id=${encodeURIComponent(id)}`, { credentials: 'same-origin' });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return j && !j.error && j.decision_id ? (j as DecisionResult) : null;
+  } catch { return null; }
+}
+async function resolveDecision(id: string, body: { action: string; selected?: string[]; value?: string }): Promise<{ ok: boolean; error?: string; result?: DecisionResult }> {
+  try {
+    const r = await fetch(`/api/telegram/decisions/${encodeURIComponent(id)}/resolve`, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    return await r.json();
+  } catch (e: any) { return { ok: false, error: e?.message || String(e) }; }
+}
+
 /**
  * The meeting room's window. With a meeting at the table it shows how it's going (and stops it, or
  * clears the table once it's over); otherwise, or with a preset from an issue or a PR, it's the form
  * that calls one.
  */
 export function openMeeting(net: Net, actions: MeetingActions, preset?: MeetingPreset) {
+  void net; // dual-channel 決策走 HTTP/WS store；保留參數相容
   const close = h('button.btn.close', { 'aria-label': 'Close' }, '✕');
   const title = h('h2', {}, '🤝 Meeting room');
   const body = h('div.body.meeting');
@@ -45,34 +64,43 @@ export function openMeeting(net: Net, actions: MeetingActions, preset?: MeetingP
   const el = h('div.modal.meeting-window', { role: 'dialog', 'aria-label': 'Meeting room' }, h('header', {}, title, close), body, foot);
   let view: 'status' | 'form' = preset || !store.meeting.current ? 'form' : 'status';
   let form: ReturnType<typeof meetingForm> | null = null;
+  const dui: DecisionUi = { selected: new Set(), forId: '', submitting: false, poll: null };
+  const stopPoll = () => { if (dui.poll) { clearInterval(dui.poll); dui.poll = null; } };
   const render = () => {
+    const decision = store.meeting.current ? store.decisionForMeeting(store.floor, store.meeting.current.id) : undefined;
+    if (decision && decision.state !== dui.lastState && dui.lastState && decision.state !== 'pending') {
+      const who = decision.from?.includes('office') ? 'Office UI' : decision.from ? 'Telegram/外部' : '其他通道';
+      toast(`核准已${decision.state === 'resolved' ? '完成' : decision.state === 'cancelled' ? '取消' : '逾時'}（${who}）`, decision.state === 'resolved' ? 'info' : 'warn');
+    }
+    dui.lastState = decision?.state;
+    if (!decision || decision.state !== 'pending') stopPoll();
+    else if (!dui.poll) dui.poll = setInterval(async () => {
+      const cur = store.meeting.current ? store.decisionForMeeting(store.floor, store.meeting.current.id) : undefined;
+      if (!cur || cur.state !== 'pending') { stopPoll(); render(); return; }
+      const fresh = await fetchDecision(cur.decision_id);
+      if (fresh) { store.decisions.set(fresh.decision_id, fresh); store.emit('decision'); }
+    }, 2500);
     if (view === 'status' && store.meeting.current) {
       form = null;
       title.textContent = '🤝 Meeting room';
-      renderStatus(store.meeting.current, body, foot, net, actions, () => {
-        view = 'form';
-        render();
-      });
+      renderStatus(store.meeting.current, body, foot, net, actions, () => { view = 'form'; render(); }, decision, dui, render);
       return;
     }
     if (!form) {
-      form = meetingForm(net, preset, () => modal.close(), () => {
-        view = 'status';
-        render();
-      });
+      form = meetingForm(net, preset, () => modal.close(), () => { view = 'status'; render(); });
       title.textContent = '🤝 Call a meeting';
       body.replaceChildren(form.body);
       foot.replaceChildren(...form.foot);
     }
     form.refresh();
   };
-  const offs = [store.on('meeting', render), store.on('workers', () => view === 'status' && render()), store.on('pulls', () => form?.refresh())];
-  const modal: Modal = openModal(el, { doing: '🤝 at the meeting room', onClose: () => offs.forEach((off) => off()) });
+  const offs = [store.on('meeting', render), store.on('decision', render), store.on('workers', () => view === 'status' && render()), store.on('pulls', () => form?.refresh())];
+  const modal: Modal = openModal(el, { doing: '🤝 at the meeting room', onClose: () => { stopPoll(); offs.forEach((off) => off()); } });
   close.addEventListener('click', () => modal.close());
   render();
 }
 
-function renderStatus(m: Meeting, body: HTMLElement, foot: HTMLElement, net: Net, actions: MeetingActions, callAnother: () => void) {
+function renderStatus(m: Meeting, body: HTMLElement, foot: HTMLElement, net: Net, actions: MeetingActions, callAnother: () => void, decision?: DecisionResult, dui?: DecisionUi, rerender?: () => void) {
   const p = MEETING_PATTERNS[m.pattern];
   const running = m.status === 'running';
   const pill = h('span.pill', { class: running ? 'working' : m.status === 'done' ? 'done' : 'needs_input' }, running ? 'in a meeting' : m.status);
@@ -100,6 +128,7 @@ function renderStatus(m: Meeting, body: HTMLElement, foot: HTMLElement, net: Net
   const review = m.review?.url ? h('a', { href: m.review.url, target: '_blank', rel: 'noopener noreferrer' }, `🔍 The review on PR #${m.pr} ↗`) : m.review?.error ? h('span.bad', {}, `Couldn't post the review: ${m.review.error}`) : null;
   body.replaceChildren(
     ...present(
+    decision && dui && rerender ? renderDecisionPanel(decision, dui, rerender) : null,
     h('div.meeting-head', {}, pill, h('b', {}, `${p.icon} ${p.label}`), h('span.meeting-title', { title: m.prompt }, m.title)),
     h('p.meeting-line', {}, running ? `${meetingStage(m)} · called by ${m.calledBy} ${timeAgo(new Date(m.startedAt).toISOString())}` : m.status === 'done' ? `✅ Wrote ${m.output} in ${m.round} round${m.round === 1 ? '' : 's'}` : `⛔ Stopped in round ${m.round}: ${m.reason ?? 'stopped'}`),
     m.tokens ? h('p.meeting-spend', { title: `${m.tokens.toLocaleString()} tokens, cache reads included` }, `💸 ${meetingSpend(m)}${running ? ' so far' : ''}`) : null,
@@ -122,7 +151,74 @@ function renderStatus(m: Meeting, body: HTMLElement, foot: HTMLElement, net: Net
   );
 }
 
-const present = (...xs: (Node | null)[]): Node[] => xs.filter((x): x is Node => x !== null);
+const present = (...xs: (Node | null | undefined | false)[]): Node[] => xs.filter((x): x is Node => x instanceof Node);
+
+function renderDecisionPanel(d: DecisionResult, dui: DecisionUi, rerender: () => void): HTMLElement {
+  const info = ((d.metadata as any)?.request || {}) as DecisionInfo;
+  const opts = Array.isArray(info.options) ? info.options : [];
+  const type = info.type || 'multi';
+  const panel = h('section.meeting-decision', { style: 'margin:0 0 12px;padding:12px;border:1px solid rgba(148,163,184,.35);border-radius:10px;background:rgba(15,23,42,.18)' });
+  panel.append(h('div', { style: 'font-weight:600;margin-bottom:4px' }, `📣 ${info.text || '核准請求'}`));
+  if (info.description) panel.append(h('div.muted', { style: 'margin-bottom:8px;white-space:pre-wrap' }, info.description));
+  panel.append(h('div.muted', { style: 'font-size:12px;margin-bottom:8px' }, `decision: ${d.decision_id} · ${d.state}${d.from ? ` · 來源:${d.from}` : ''}`));
+
+  if (d.state !== 'pending') {
+    const who = d.from?.includes('office') ? 'Office UI' : d.from ? 'Telegram/外部' : '—';
+    panel.append(h('div', {}, `結果：${d.action || d.state}${d.selected?.length ? `（${d.selected.join(', ')}）` : d.value ? `（${d.value}）` : ''} · ${who}`));
+    panel.append(h('div.muted', { style: 'font-size:12px;margin-top:4px' }, '已由任一通道完成；此提示面板自動同步。✕/Esc 僅關閉視窗。'));
+    return panel;
+  }
+
+  if (dui.forId !== d.decision_id) { dui.forId = d.decision_id; dui.selected = new Set(); }
+  const realKeys = opts.map(o => o.key).filter(k => k !== '__all__');
+  const submit = async (action: string, value?: string) => {
+    if (dui.submitting) return;
+    dui.submitting = true; rerender();
+    const body: any = { action };
+    if (action === 'submit') body.selected = [...dui.selected].filter(k => k !== '__all__');
+    if (value) body.value = value;
+    const res = await resolveDecision(d.decision_id, body);
+    dui.submitting = false;
+    if (!res.ok && res.error && !/目前狀態/.test(res.error)) toast(res.error, 'warn');
+    if (res.result) { store.decisions.set(res.result.decision_id, res.result); store.emit('decision'); }
+    else { const fresh = await fetchDecision(d.decision_id); if (fresh) { store.decisions.set(fresh.decision_id, fresh); store.emit('decision'); } }
+    rerender();
+  };
+
+  if (type === 'multi') {
+    const list = h('div', { style: 'display:flex;flex-direction:column;gap:6px;margin:8px 0' });
+    for (const o of opts) {
+      const checked = o.key === '__all__' ? realKeys.length > 0 && realKeys.every(k => dui.selected.has(k)) : dui.selected.has(o.key);
+      const cb = h('input', { type: 'checkbox' }) as HTMLInputElement;
+      cb.checked = checked; cb.disabled = dui.submitting;
+      cb.addEventListener('change', () => {
+        if (o.key === '__all__') { if (cb.checked) realKeys.forEach(k => dui.selected.add(k)); else realKeys.forEach(k => dui.selected.delete(k)); }
+        else { if (cb.checked) dui.selected.add(o.key); else dui.selected.delete(o.key); }
+        rerender();
+      });
+      list.append(h('label', { style: 'display:flex;gap:8px;align-items:center;cursor:pointer' }, cb, h('span', {}, o.label)));
+    }
+    panel.append(list);
+  } else if (type === 'pick') {
+    const list = h('div', { style: 'display:flex;flex-wrap:wrap;gap:8px;margin:8px 0' });
+    for (const o of opts) list.append(h('button.btn', { type: 'button', disabled: dui.submitting, onclick: () => submit('pick', o.key) }, o.label));
+    panel.append(list);
+  }
+
+  const row = h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center' });
+  if (type === 'approve') {
+    row.append(h('button.btn', { type: 'button', disabled: dui.submitting, onclick: () => submit('approve') }, info.approve_label || '批准'));
+    row.append(h('button.btn.ghost', { type: 'button', disabled: dui.submitting, onclick: () => submit('reject') }, info.reject_label || '駁回'));
+  } else if (type === 'multi') {
+    row.append(h('button.btn', { type: 'button', disabled: dui.submitting, onclick: () => submit('submit') }, info.submit_label || '送出'));
+    row.append(h('button.btn.ghost', { type: 'button', disabled: dui.submitting, onclick: () => submit('cancel') }, info.cancel_label || '取消'));
+  } else {
+    row.append(h('button.btn.ghost', { type: 'button', disabled: dui.submitting, onclick: () => submit('cancel') }, info.cancel_label || '取消'));
+  }
+  row.append(h('span.muted', { style: 'font-size:12px' }, dui.submitting ? '送出中…' : '可在 Telegram 或此處核准；✕/Esc 僅關閉視窗，不變更決策。'));
+  panel.append(row);
+  return panel;
+}
 
 /** The form that calls a meeting: the pattern, what it's about, who sits down, the output, the round limit. */
 function meetingForm(net: Net, preset: MeetingPreset | undefined, done: () => void, back: () => void) {

@@ -23,6 +23,7 @@ import { machine } from './machine';
 import { map } from './map';
 import { meeting } from './meeting';
 import { notify } from './notify';
+import { telegramDecisions } from './telegram-decisions';
 import { prompts } from './prompts';
 import { services } from './services';
 import { signins } from './signins';
@@ -48,6 +49,7 @@ export const SLICES: readonly Slice[] = [
   map,
   floor,
   meeting,
+  telegramDecisions,
   decor,
   floorPlan,
   services,
