@@ -77,6 +77,7 @@ export async function openFloors(ctx: Ctx, hookPort: number): Promise<FloorsOpen
     ledger: ctx.ledger,
     capacity: ctx.machine,
     prompts: ctx.prompts,
+    telegramDecisions: ctx.telegramDecisions,
     emit: ctx.toFloor,
     toast: ctx.toastFloor,
     termData: (workerId, data, viewers) => {

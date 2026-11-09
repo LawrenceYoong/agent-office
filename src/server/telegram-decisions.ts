@@ -75,6 +75,10 @@ function clip(s: string, n: number): string { return s.length > n ? s.slice(0, n
 export class TelegramDecisions {
   private pending = new Map<string, Pending>();
   private sweep: NodeJS.Timeout;
+  private resolvedHandlers: Array<(r: DecisionResult) => void | Promise<void>> = [];
+
+  /** C4/C3: react to resolved/cancelled/expired decisions (e.g. orchestrator, UI sync). */
+  onResolved(cb: (r: DecisionResult) => void | Promise<void>): void { this.resolvedHandlers.push(cb); }
 
   constructor(private readonly tg: TelegramGateway) {
     this.tg.onCallbackData((data, from, updateId) => this.handleCallback(data, from, updateId));
@@ -225,6 +229,7 @@ export class TelegramDecisions {
         body: JSON.stringify(p.result),
       }).catch(() => { /* 呼叫方離線：結果仍可輪詢 */ });
     }
+    if (p.result) for (const cb of this.resolvedHandlers) Promise.resolve(cb(p.result)).catch(() => {});
   }
 
   private summary(p: Pending): string {

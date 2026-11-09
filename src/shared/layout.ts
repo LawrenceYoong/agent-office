@@ -201,6 +201,8 @@ export const MEETING_SEATS: DeskDef[] = (
 ).map(([x, z, rotY], i) => ({ id: `meeting-${i + 1}`, x, z, rotY, label: i === 0 ? 'Head of the table' : `Meeting chair ${i + 1}`, room: true }));
 /** The board on the meeting room's back (south) wall that shows the meeting's output file as it's written. */
 export const MEETING_BOARD = { x: MEETING_TABLE.x, y: 1.95, z: FLOOR.maxZ - 0.08, width: 3.6, height: 1.2 } as const;
+/** PM 代理入口位置（C2a，最小：流程先打通；常駐 agent/完整 3D 模型在 C2b+） */
+export const MEETING_PM = { x: MEETING_ROOM.door.x0 - 0.9, z: MEETING_ROOM.minZ - 0.6, rotY: Math.PI } as const;
 
 /** Any place a worker can be by id: the seats (the back office's included), the board agents' kiosks and the meeting room's chairs. */
 export const DESK_BY_ID = new Map([...SEATS, ...STATIONS, ...MEETING_SEATS].map((d) => [d.id, d]));
