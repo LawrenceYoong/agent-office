@@ -77,6 +77,16 @@ export const MEETING_PATTERNS: Record<MeetingPattern, PatternDef> = {
     output: (_slug, pr) => `reviews/pr-${pr ?? 'n'}.md`,
     needs: 'pr',
   },
+  standup: {
+    icon: '📋',
+    label: 'Standup',
+    blurb: 'Product/Project/UIUX managers report verified status and blockers; the chair synthesizes priorities, decisions, and manager assignments into a standup record.',
+    roles: ['Product Manager', 'Project Manager', 'UI/UX Manager', 'Engineer'],
+    seats: { min: 2, max: 4, default: 3 },
+    rounds: { min: 2, max: 2, default: 2 },
+    stages: ['Report', 'Synthesize'],
+    output: () => `docs/todo/${ymdhis()}.md`,
+  },
 };
 
 export const MEETING_PATTERN_IDS = Object.keys(MEETING_PATTERNS) as MeetingPattern[];
@@ -123,6 +133,12 @@ export function outputProblem(p: string): string | undefined {
 
 /** "3 rounds" / "round 2 of 3". */
 const rounds = (n: number) => `${n} round${n === 1 ? '' : 's'}`;
+
+/** ymdhis timestamp for standup output paths (multiple standups per day). */
+export function ymdhis(d = new Date()): string {
+  const p = (n: number, w = 2) => String(n).padStart(w, '0');
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}
 
 /**
  * For a pattern that always runs the same rounds, what the dialog shows in place of a limit to set:

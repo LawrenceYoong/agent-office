@@ -368,6 +368,22 @@ const DEFS = {
     needs: ['output'],
     text: `Read every reviewer's findings ({{findings}}). Drop the duplicates, keeping the clearest wording, and write one combined review to {{output}} in Markdown: a short summary with your verdict first, then the findings, the most serious first, each tagged with the lens it came from in bold brackets like **[{{exampleRole}}]**, with its file:line. Don't post it: the office posts it on the pull request once the file is written. ${OUTPUT}`,
   },
+  'meeting.standup.report': {
+    group: 'meetings',
+    label: 'Standup · report',
+    used: 'Round 1 of a Standup, for each manager. Report only from the verified context; mark anything else unverified.',
+    vars: { role: 'Their role', context: 'Verified status snapshot the office gathered (may be partial)', file: FILE_NOTE },
+    needs: ['file'],
+    text: 'Report as {{role}} for this standup. Use only the verified context below; do not guess. For each item mark it verified, unverified, or unknown.\n\nVerified context (treat as the source of truth for what is known):\n{{context}}\n\nWrite {{file}} with short bullets: (1) Verified completed, (2) In-flight and blockers (owner/evidence or unverified), (3) Next actions, (4) Decisions or approvals needed from Product Manager/user. Then end your turn.',
+  },
+  'meeting.standup.synthesize': {
+    group: 'meetings',
+    label: 'Standup · synthesize',
+    used: 'Round 2 of a Standup, for the Product Manager/chair. Produces the standup record the meeting waits for.',
+    vars: { reports: "Managers' reports", context: 'Verified status snapshot', output: OUTPUT_NOTE },
+    needs: ['output'],
+    text: `Read the managers' reports ({{reports}}) and the verified context below. Synthesize a standup record in Markdown with these sections: 日期與範圍, Verified 完成, In-flight 與阻塞 (owner/證據/unverified), 待決策 (需使用者/PM), 今日優先, 擬指派與授權請求 (僅指派 managers；派工由 managers 在授權內決定，≤5、manager 分支/worktree、PR 回 manager 分支、merge 需明確授權), 證據連結 (issue/PR/head/CI/檔案；未知標註), 未驗證事項. Do not invent facts; keep unverified items clearly marked. Write it to {{output}}. ${OUTPUT}\n\nVerified context:\n{{context}}`,
+  },
 
   // --- 🏷️ Worker signs ---
   'office.namer': {

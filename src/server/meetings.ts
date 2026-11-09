@@ -10,6 +10,7 @@ import { validateWorkerEffort, validateWorkerModel } from './agents.js';
 import { providerMeta, takesEffort, takesModel } from '../shared/providers.js';
 import { gitError, type WorktreeRef, type WorktreeState } from './worktrees.js';
 import { PROMPTS, fillPrompt, type PromptId, type PromptVars } from '../shared/prompts.js';
+import { gatherStandupContext, planStandup, standupHow } from './meeting-standup.js';
 
 const execFileP = promisify(execFile);
 
@@ -196,6 +197,7 @@ export class MeetingRoom {
       // Without git, the notes go with the floor's other state.
       notes: worktree ? MEETING_NOTES_DIR : `.agent-office/meetings/${id}`,
     };
+    if (m.pattern === 'standup') (m as any)._standupContext = gatherStandupContext({ projectDir: this.dir, cwd: this.cwd(m), workers: this.workers.list(), meeting: m });
     mkdirSync(path.join(this.cwd(m), m.notes), { recursive: true });
     const first = this.plan(m, 1, 1) ?? [];
     for (let i = 0; i < m.seats.length; i++) {
@@ -518,6 +520,7 @@ export class MeetingRoom {
       mapreduce: `Round 1: each mapper does the task over its own parts. Round 2: the ${head} combines what they found into one result.`,
       redblue: `Each round the Red team attacks the change (bugs, security holes, edge cases) and the Blue team fixes what holds up. The ${head} writes it all up in the last round, which comes early if Red finds nothing more.`,
       review: `Round 1: each reviewer reviews the pull request through their own lens. Round 2: the ${head} merges the reviews into one, which the office posts on the pull request.`,
+      standup: standupHow(head),
     };
     const where = !m.worktree
       ? `You're in the project's folder, which other people use too: don't commit, push or switch branches.`
@@ -525,7 +528,6 @@ export class MeetingRoom {
         ? `This is a review: don't change, commit or push anything in the checkout. The only files you write are your notes${i === 0 ? ` and ${m.output}` : ''}.`
         : `You all share one git worktree, on the branch ${m.worktree.branch}. Don't commit, push or switch branches: when the meeting is over, the office commits ${m.output}, with whatever else was changed, there.`;
     // The worktree sits inside the project's own folder, where a search can wander off to.
-    const inside = m.worktree ? ` The whole project is checked out in your working directory: read and write files there, by paths inside it, and never in a folder above it.` : '';
     return this.say('meeting.brief', {
       title: m.title,
       role,
@@ -540,7 +542,7 @@ export class MeetingRoom {
       output: m.output,
       outputPath: path.join(this.cwd(m), m.output),
       rounds: `${m.rounds} round${m.rounds === 1 ? '' : 's'}`,
-      where: where + inside,
+      where: where + (m.worktree ? ` The whole project is checked out in your working directory: read and write files there, by paths inside it, and never in a folder above it.` : ''),
     });
   }
 
@@ -556,14 +558,12 @@ export class MeetingRoom {
 
   /** The parts of step `step` of round `round`, or null when that round has no such step. */
   private plan(m: Meeting, round: number, step: number): Part[] | null {
-    const n = m.seats.length;
-    // Parts name their files by full path: a worktree sits inside the project's own folder, and an
-    // agent can take a relative path to be the project's (and then it's asked about writing outside).
     const A = (rel: string) => path.join(this.cwd(m), rel);
     const note = (r: number, i: number) => `${m.notes}/r${r}-${i + 1}-${slugify(m.seats[i].role, 24)}.md`;
     const notes = (r: number, seats: number[]) => seats.map((i) => A(note(r, i))).join(', ');
     const all = m.seats.map((_, i) => i);
     const last = this.isLast(m, round);
+    if (m.pattern === 'standup') return planStandup({ m, round, step, abs: A, note, notesOf: notes, all, last });
     switch (m.pattern) {
       case 'debate': {
         if (step > 1) return null;
