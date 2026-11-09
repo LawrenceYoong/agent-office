@@ -11,6 +11,7 @@ import { Ledger } from '../usage.js';
 import { PlanLimitsReader } from '../limits.js';
 import { Webhook } from '../webhook.js';
 import { TelegramGateway } from '../telegram.js';
+import { TelegramDecisions } from '../telegram-decisions.js';
 import { Machine } from '../machine.js';
 import type { Floor } from '../floor.js';
 import { Sky } from '../sky.js';
@@ -104,6 +105,8 @@ export function createServices(ctx: Ctx): BuildingServices {
   telegram.subscribe('agent-office', officeCallbackUrl);
   telegram.activate('agent-office');
   telegram.onReply((agentId, msg) => { try { ctx.toastAll('Telegram reply (' + agentId + '): ' + msg.text, 'info'); } catch { /* no clients */ } });
+  // 決策/核准 API：攔截 callback_data (d|...) 並回傳結果給呼叫方
+  const telegramDecisions = new TelegramDecisions(telegram);
   const poller = setInterval(() => { try { telegram.drain('agent-office'); } catch { /* ignore */ } }, 5000);
   poller.unref();
   if (cfg.webhook !== undefined) {
@@ -133,7 +136,7 @@ export function createServices(ctx: Ctx): BuildingServices {
     });
   };
 
-  return { sky, themes, maps, prompts, leaveOnMerge, ledger, signins, limits, accountLimits, webhook, telegram, machine, limitsOf, pumpQueues };
+  return { sky, themes, maps, prompts, leaveOnMerge, ledger, signins, limits, accountLimits, webhook, telegram, telegramDecisions, machine, limitsOf, pumpQueues };
 }
 
 /** What's made once the floors are open: the SSH team, the tailnet, workers' web servers, pictures and upgrades. */

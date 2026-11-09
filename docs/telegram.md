@@ -29,12 +29,14 @@ curl -X POST -H 'X-Telegram-Gateway-Secret: <secret>' \
 All agent endpoints accept either a signed-in browser session or the `X-Telegram-Gateway-Secret` header.
 
 - `POST /api/telegram/send` `{ text, chat_id?, reply_markup? }` → send to owner (or a chat).
+- `POST /api/telegram/edit` `{ chat_id?, message_id, text?, reply_markup? }` → edit a message / inline keyboard.
 - `POST /api/telegram/subscribe` `{ agent_id, callback_url? }` → register a listener.
 - `POST /api/telegram/unsubscribe` `{ agent_id }`
 - `POST /api/telegram/activate` `{ agent_id }` → make it the active listener.
 - `GET  /api/telegram/inbox?agent=<id>&secret=<secret>` → poll pending replies (drains).
 - `GET  /api/telegram/status` → configured, active, subscriptions.
 - `POST /api/telegram/webhook` (public) → Telegram update receiver.
+- **決策/核准 API（推薦給其他專案）**：見 [`docs/telegram-decisions.md`](./telegram-decisions.md)（`/api/telegram/decisions`，支援 批准/駁回、單選、多選後送出，含 callback 回傳與輪詢）。
 
 ## Receiving replies
 

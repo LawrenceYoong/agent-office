@@ -10,6 +10,12 @@ function authorized(ctx: Ctx, req: import('node:http').IncomingMessage): boolean
   return !!ctx.auth.fromRequest(req);
 }
 
+async function readJson(req: import('node:http').IncomingMessage): Promise<any | null> {
+  const chunks: Buffer[] = [];
+  for await (const c of req) chunks.push(c as Buffer);
+  try { return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); } catch { return null; }
+}
+
 export const telegramRoutes = {
   // Telegram calls this (public). Verified by the secret token header.
   webhook: {
@@ -169,6 +175,56 @@ export const telegramRoutes = {
         active: ctx.telegram.activeListener(),
         subscriptions: ctx.telegram.subscriptions(),
       });
+    },
+  },
+  // Gateway 原語：編輯訊息按鈕/文字（多選切換等）
+  edit: {
+    method: 'POST',
+    path: '/api/telegram/edit',
+    auth: 'public',
+    handle: async (ctx, { req, res }) => {
+      if (!authorized(ctx, req)) return send(res, 401, { error: 'not authorized' });
+      const body = await readJson(req);
+      if (!body) return send(res, 400, { error: 'bad json' });
+      const chatId = body.chat_id ?? ctx.telegram.ownerChatId();
+      const messageId = Number(body.message_id);
+      if (!chatId || !Number.isFinite(messageId)) return send(res, 400, { error: 'chat_id (或預設 owner) 與 message_id 必填' });
+      if (typeof body.text === 'string') {
+        const r = await ctx.telegram.editMessageText(chatId, messageId, body.text, body.reply_markup);
+        return send(res, r.ok ? 200 : 502, r);
+      }
+      const r = await ctx.telegram.editMessageReplyMarkup(chatId, messageId, body.reply_markup ?? { inline_keyboard: [] });
+      return send(res, r.ok ? 200 : 502, r);
+    },
+  },
+  // 決策/核准 API（中文為主）：其他專案送請求 → agent-office 發 Telegram 給 owner → 結果回傳 callback_url 或可輪詢
+  decisions: {
+    prefix: '/api/telegram/decisions',
+    auth: 'public',
+    handle: async (ctx, { req, res, url, path }) => {
+      if (!authorized(ctx, req)) return send(res, 401, { error: 'not authorized' });
+      const sub = path.slice('/api/telegram/decisions'.length).replace(/^\/+/, '');
+      const method = req.method || 'GET';
+
+      if (method === 'POST' && !sub) {
+        const body = await readJson(req);
+        if (!body) return send(res, 400, { error: 'bad json' });
+        const r = await ctx.telegramDecisions.request(body);
+        return send(res, r.ok ? 200 : 400, r);
+      }
+      if (method === 'GET' && !sub) {
+        const id = url.searchParams.get('id');
+        if (id) return send(res, 200, ctx.telegramDecisions.get(id));
+        const agent = url.searchParams.get('agent') || undefined;
+        return send(res, 200, { decisions: ctx.telegramDecisions.list(agent) });
+      }
+      if (sub) {
+        const parts = sub.split('/').filter(Boolean);
+        const id = parts[0];
+        if (method === 'POST' && parts[1] === 'cancel') return send(res, 200, ctx.telegramDecisions.cancel(id));
+        if (method === 'GET') return send(res, 200, ctx.telegramDecisions.get(id));
+      }
+      return send(res, 405, { error: '用法: POST /api/telegram/decisions | GET /api/telegram/decisions?id=<id> | GET /api/telegram/decisions?agent=<agent_id> | POST /api/telegram/decisions/<id>/cancel' });
     },
   },
 } satisfies Record<string, Route>;
