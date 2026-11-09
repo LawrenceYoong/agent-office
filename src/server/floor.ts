@@ -29,6 +29,7 @@ import type { Capacity } from './machine.js';
 import { officePrompt, type PromptSource } from './prompts.js';
 import type { Meeting, MeetingState } from '../shared/protocol.js';
 import type { TelegramDecisions } from './telegram-decisions.js';
+import { handleStandupDecisionResolved } from './standup-orchestrator.js';
 
 type ToastLevel = 'info' | 'warn' | 'error';
 
@@ -278,10 +279,28 @@ export class Floor {
         prompt: (id) => ctx.prompts.text(id),
       },
     );
-    // C3: 決策狀態變更（含 Telegram 已核准）→ 推送給同 floor UI，自動關閉/同步
+    // C3: 決策狀態變更（含 Telegram 已核准）→ 推送給同 floor UI，自動關閉/同步；C4: 授權後冪等指派 managers
     ctx.telegramDecisions?.onResolved?.((result) => {
       const fid = (result.metadata as any)?.floorId;
-      if (fid === this.def.id) ctx.emit(this, { t: 'decision', result } as any);
+      if (fid === this.def.id) {
+        ctx.emit(this, { t: 'decision', result } as any);
+        try {
+          handleStandupDecisionResolved({
+            floorId: this.def.id,
+            floorName: this.def.name,
+            projectDir: this.def.dir,
+            dataDir,
+            listWorkers: () => this.workers.list().map(w => ({ id: w.id, deskId: w.deskId, name: w.name, status: w.status })),
+            spawnWorker: (deskId, prompt, by) => {
+              const r = this.workers.spawn(deskId, by, prompt, true, 'agent');
+              return typeof r === 'string' ? { ok: false, error: r } : { ok: true, id: r.id, name: r.name, deskId: r.deskId };
+            },
+            toast: (text, level) => ctx.toast(this, text, level),
+          }, result);
+        } catch (e: any) {
+          ctx.toast(this, `Standup 指派 managers 失敗：${e?.message || e}`, 'warn');
+        }
+      }
     });
 
     // What each worker changed, for the Changes window at its desk (see changes.ts).
