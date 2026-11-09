@@ -121,6 +121,17 @@ export class TelegramDecisions {
     return data.length > 64 ? `d|${id}|${act}|${val.slice(0, 64 - (`d|${id}|${act}|`).length)}` : data;
   }
 
+  private isAllKey(key: string): boolean { return key === '__all__'; }
+
+  private realOptionKeys(options: DecisionOption[]): string[] {
+    return options.map(o => o.key).filter(k => !this.isAllKey(k));
+  }
+
+  private allSelected(p: Pending, options: DecisionOption[]): boolean {
+    const real = this.realOptionKeys(options);
+    return real.length > 0 && real.every(k => p.selected.has(k));
+  }
+
   private markup(p: Pending, options: DecisionOption[]): unknown {
     if (p.req.type === 'approve' || p.req.type === 'pick') {
       const row = options.map(o => ({ text: o.label, callback_data: this.encode(p.id, p.req.type === 'approve' ? (o.key === 'reject' ? 'no' : 'ok') : 'p', o.key) }));
@@ -129,9 +140,10 @@ export class TelegramDecisions {
       for (let i = 0; i < row.length; i += 3) rows.push(row.slice(i, i + 3));
       return { inline_keyboard: rows };
     }
-    // multi: toggle + submit/cancel
+    // multi: toggle + submit/cancel（支援 __all__ 全選切換）
+    const allOn = this.allSelected(p, options);
     const rows: any[] = options.map(o => ([{
-      text: `${p.selected.has(o.key) ? '☑' : '☐'} ${o.label}`,
+      text: `${(this.isAllKey(o.key) ? allOn : p.selected.has(o.key)) ? '☑' : '☐'} ${o.label}`,
       callback_data: this.encode(p.id, 't', o.key),
     }]));
     rows.push([
@@ -243,7 +255,15 @@ export class TelegramDecisions {
 
     if (p.req.type === 'multi') {
       if (m.act === 't') {
-        if (p.selected.has(m.val)) p.selected.delete(m.val); else p.selected.add(m.val);
+        if (this.isAllKey(m.val)) {
+          const norm = this.normalizeOptions(p.req);
+          if (norm.ok) {
+            const real = this.realOptionKeys(norm.options);
+            const allOn = real.length > 0 && real.every(k => p.selected.has(k));
+            if (allOn) for (const k of real) p.selected.delete(k);
+            else for (const k of real) p.selected.add(k);
+          }
+        } else if (p.selected.has(m.val)) p.selected.delete(m.val); else p.selected.add(m.val);
         if (p.messageId && p.chatId) {
           const norm = this.normalizeOptions(p.req);
           if (norm.ok) void this.tg.editMessageReplyMarkup(p.chatId, p.messageId, this.markup(p, norm.options)).catch(() => {});
@@ -251,7 +271,8 @@ export class TelegramDecisions {
         return true;
       }
       if (m.act === 's') {
-        this.resolve(p, { state: 'resolved', action: 'submit', selected: [...p.selected], raw: data, from, at: Date.now() });
+        const selected = [...p.selected].filter(k => !this.isAllKey(k));
+        this.resolve(p, { state: 'resolved', action: 'submit', selected, raw: data, from, at: Date.now() });
         return true;
       }
       if (m.act === 'c') {
