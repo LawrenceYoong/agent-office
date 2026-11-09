@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { ChangesState, FloorInfo, PeerInfo, ProjectInfo, ServerMsg, WorkerInfo } from '../shared/protocol.js';
 import { isBusy } from '../shared/status.js';
@@ -27,6 +27,8 @@ import { landedWork, landedWorkers, type Landed } from './leave-on-merge.js';
 import type { Ledger } from './usage.js';
 import type { Capacity } from './machine.js';
 import { officePrompt, type PromptSource } from './prompts.js';
+import type { Meeting, MeetingState } from '../shared/protocol.js';
+import type { TelegramDecisions } from './telegram-decisions.js';
 
 type ToastLevel = 'info' | 'warn' | 'error';
 
@@ -43,6 +45,8 @@ export interface FloorContext {
   capacity: Capacity;
   /** The office's prompts and the worker everyone starts on, as set in ⚙️ Settings. */
   prompts: PromptSource;
+  /** Telegram 決策/核准 API（meeting 完成 → 核准 → 指派 managers）。 */
+  telegramDecisions?: TelegramDecisions;
   /** Workers hired by an account run on its own sign-ins (see signins.ts). */
   runAs?: RunAs;
   /** How to run gh as an account: its own sign-in, the office's (undefined), or why it can't. */
@@ -264,7 +268,7 @@ export class Floor {
       },
       this.project.branch ? new Worktrees(def.dir) : undefined,
       {
-        update: (state) => ctx.emit(this, { t: 'meeting', state }),
+        update: (state) => { ctx.emit(this, { t: 'meeting', state }); this.onMeetingUpdate(state); },
         toast: (text, level) => ctx.toast(this, text, level),
         hiringPaused: () => ctx.ledger.hiringPaused,
         postReview: (pr, file, owner) => {
@@ -406,6 +410,72 @@ export class Floor {
       people: this.ctx.people(this),
       wing: this.plan.wing,
     };
+  }
+
+  private meetingDecisionHandled = new Set<string>();
+
+  private monitorAgentId(): string {
+    const env = process.env.AGENT_OFFICE_MONITOR_AGENT_ID?.trim();
+    if (env) return env;
+    try {
+      const p = path.join(this.def.dir, '.agent-office', 'monitor.json');
+      if (existsSync(p)) { const j = JSON.parse(readFileSync(p, 'utf8')); if (j?.agent_id) return String(j.agent_id); }
+    } catch { /* ignore */ }
+    const raw = (this.def.repo?.split('/').pop() || this.def.name || this.def.id || 'project').toLowerCase();
+    const base = raw.replace(/[^a-z0-9]+/g, '-').replace(/-v\d+$/,'').replace(/^-+|-+$/g, '');
+    return base.endsWith('-monitor') ? base : `${base}-monitor`;
+  }
+
+  private meetingOutputPreview(m: Meeting): string {
+    const cwd = m.worktree ? path.join(this.def.dir, m.worktree.path) : this.def.dir;
+    try { if (m.output) return readFileSync(path.join(cwd, m.output), 'utf8').slice(0, 2400); } catch { /* ignore */ }
+    return m.preview?.slice(0, 2400) || '';
+  }
+
+  private async onMeetingUpdate(state: MeetingState): Promise<void> {
+    const m = state.current;
+    if (!m || m.status !== 'done') return;
+    const key = `${m.id}:done`;
+    if (this.meetingDecisionHandled.has(key)) return;
+    this.meetingDecisionHandled.add(key);
+    const agentId = this.monitorAgentId();
+    const correlation = `meeting:${this.def.id}:${m.id}`;
+    const preview = this.meetingOutputPreview(m);
+    const outputPath = m.output ? (m.worktree ? `${m.worktree.path}/${m.output}` : m.output) : '(none)';
+    const description = [
+      `會議：${m.title} (${m.pattern})`,
+      `狀態：${m.status}${m.reason ? ` (${m.reason})` : ''}`,
+      `輸出：${outputPath}`,
+      m.worktree?.branch ? `分支：${m.worktree.branch}` : '',
+      '',
+      'v1 授權範圍：僅授權指派 managers（Project Manager / UI/UX Manager）。派工由 managers 在授權內決定（≤5、manager 分支/worktree、PR 回 manager 分支、merge 需明確授權）。',
+      '',
+      preview ? `--- standup/meeting output (excerpt) ---\n${preview}` : '（輸出內容未讀取；請以實際檔案/證據為準）',
+    ].filter(Boolean).join('\n');
+    const req = {
+      agent_id: agentId,
+      type: 'multi' as const,
+      text: `【Standup/Meeting 核准】${this.def.name}：${m.title}`,
+      description,
+      options: [
+        { key: '__all__', label: '全選' },
+        { key: 'assign_project_manager', label: '指派 Project Manager' },
+        { key: 'assign_uiux_manager', label: '指派 UI/UX Manager' },
+        { key: 'ack_scope', label: '確認 standup scope（見輸出）' },
+      ],
+      submit_label: '✅ 核准並執行（指派 managers）',
+      cancel_label: '❌ 駁回/稍後',
+      correlation_id: correlation,
+      metadata: { floorId: this.def.id, floorName: this.def.name, meetingId: m.id, pattern: m.pattern, title: m.title, output: m.output, outputPath, worktree: m.worktree, authScope: 'assign_managers_only', source: 'agent-office.meeting.done' },
+      timeout_sec: 86400,
+    };
+    try {
+      const r = await this.ctx.telegramDecisions?.request(req);
+      if (r?.ok) this.ctx.toast(this, `📣 已發送核准請求（Telegram/輪詢，${agentId}，decision=${r.decision_id}）`, 'info');
+      else if (r) this.ctx.toast(this, `無法發送核准請求：${r.error || 'unknown'}`, 'warn');
+    } catch (e: any) {
+      this.ctx.toast(this, `發送核准請求失敗：${e?.message || e}`, 'warn');
+    }
   }
 
   /** With `keep` (a restart), the workers' terminals keep running for the next office to pick up. */
