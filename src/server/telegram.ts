@@ -39,6 +39,7 @@ export class TelegramGateway {
   private state: PersistedState;
   private readonly statePath: string;
   private readonly replyHandlers: Array<(agentId: string, msg: TelegramInboxMessage) => void> = [];
+  private callbackInterceptors: Array<(data: string, from: string, updateId: number) => boolean | Promise<boolean>> = [];
 
   constructor(private readonly cfg: TelegramConfig) {
     mkdirSync(cfg.dataDir, { recursive: true });
@@ -47,13 +48,18 @@ export class TelegramGateway {
     this.restore();
   }
 
+  /** Register a handler that can claim callback_data (e.g. decision buttons). Return true if consumed. */
+  onCallbackData(cb: (data: string, from: string, updateId: number) => boolean | Promise<boolean>): void {
+    this.callbackInterceptors.push(cb);
+  }
+
   /** Whether the bot is configured at all. */
   configured(): boolean {
     return !!this.cfg.botToken;
   }
 
   /** Send a message to the owner (or an explicit chat). */
-  async send(text: string, chatId?: string, replyMarkup?: unknown): Promise<{ ok: boolean; error?: string; result?: unknown }> {
+  async send(text: string, chatId?: string, replyMarkup?: unknown): Promise<{ ok: boolean; error?: string; result?: any }> {
     if (!this.cfg.botToken) return { ok: false, error: 'TELEGRAM_BOT_TOKEN not set' };
     const target = chatId ?? this.cfg.ownerChatId;
     if (!target) return { ok: false, error: 'no chat id' };
@@ -63,13 +69,50 @@ export class TelegramGateway {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ chat_id: target, text, parse_mode: 'Markdown', reply_markup: replyMarkup }),
       });
-      const j = (await r.json().catch(() => ({}))) as { ok?: boolean; description?: string; result?: unknown };
+      const j = (await r.json().catch(() => ({}))) as { ok?: boolean; description?: string; result?: any };
       if (!j.ok) return { ok: false, error: j.description ?? `HTTP ${r.status}` };
       return { ok: true, result: j.result };
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) };
     }
   }
+
+  /** Edit a message's inline keyboard (for multi-select/toggle flows). */
+  async editMessageReplyMarkup(chatId: string | number, messageId: number, replyMarkup: unknown): Promise<{ ok: boolean; error?: string; result?: any }> {
+    if (!this.cfg.botToken) return { ok: false, error: 'TELEGRAM_BOT_TOKEN not set' };
+    try {
+      const r = await fetch(`${TELEGRAM_API}/bot${this.cfg.botToken}/editMessageReplyMarkup`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, message_id: messageId, reply_markup: replyMarkup }),
+      });
+      const j = (await r.json().catch(() => ({}))) as { ok?: boolean; description?: string; result?: any };
+      if (!j.ok) return { ok: false, error: j.description ?? `HTTP ${r.status}` };
+      return { ok: true, result: j.result };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  /** Edit a message's text and optionally its inline keyboard. */
+  async editMessageText(chatId: string | number, messageId: number, text: string, replyMarkup?: unknown): Promise<{ ok: boolean; error?: string; result?: any }> {
+    if (!this.cfg.botToken) return { ok: false, error: 'TELEGRAM_BOT_TOKEN not set' };
+    try {
+      const r = await fetch(`${TELEGRAM_API}/bot${this.cfg.botToken}/editMessageText`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, message_id: messageId, text, parse_mode: 'Markdown', reply_markup: replyMarkup }),
+      });
+      const j = (await r.json().catch(() => ({}))) as { ok?: boolean; description?: string; result?: any };
+      if (!j.ok) return { ok: false, error: j.description ?? `HTTP ${r.status}` };
+      return { ok: true, result: j.result };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  ownerChatId(): string | undefined { return this.cfg.ownerChatId; }
+  gatewaySecret(): string | undefined { return this.cfg.gatewaySecret; }
 
   /** Register the webhook URL with Telegram. */
   async setWebhook(url: string): Promise<{ ok: boolean; error?: string; result?: unknown }> {
@@ -198,9 +241,13 @@ export class TelegramGateway {
       if (this.cfg.ownerChatId && String(cq.from?.id) !== String(this.cfg.ownerChatId)) { this.persist(); return false; }
       await this.answerCallbackQuery(cq.id);
       const data: string = cq.data ?? '';
+      const from = String(cq.from?.id ?? '');
+      for (const cb of this.callbackInterceptors) {
+        try { if (await cb(data, from, update.update_id)) { this.persist(); return true; } } catch { /* interceptor errors must not break routing */ }
+      }
       const target = this.state.active;
       if (target && this.state.subscriptions[target]) {
-        const inboxMsg: TelegramInboxMessage = { id: update.update_id, from: String(cq.from?.id), text: data, at: Date.now() };
+        const inboxMsg: TelegramInboxMessage = { id: update.update_id, from, text: data, at: Date.now() };
         const sub = this.state.subscriptions[target];
         if (sub.callback_url) {
           void fetch(sub.callback_url, { method: 'POST', headers: { 'content-type': 'application/json', 'x-telegram-gateway-secret': this.cfg.gatewaySecret ?? '' }, body: JSON.stringify({ agent_id: target, message: inboxMsg }) }).catch(() => { (this.state.inboxes[target] ??= []).push(inboxMsg); this.persist(); });

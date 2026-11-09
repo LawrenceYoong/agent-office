@@ -30,13 +30,24 @@ export class TelegramGatewayClient {
   }
 
   /** Send a message to the owner. */
-  async send(text: string, replyMarkup?: unknown): Promise<{ ok: boolean; error?: string }> {
+  async send(text: string, replyMarkup?: unknown): Promise<{ ok: boolean; error?: string; result?: any }> {
     const r = await fetch(this.url('/api/telegram/send'), {
       method: 'POST',
       headers: this.headers(),
       body: JSON.stringify({ text, reply_markup: replyMarkup }),
     });
-    const j = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+    const j = (await r.json().catch(() => ({}))) as any;
+    return { ok: !!j.ok, error: j.error, result: j.result };
+  }
+
+  /** Edit an inline keyboard or message text. */
+  async edit(messageId: number, opts: { text?: string; reply_markup?: unknown; chat_id?: string | number }): Promise<{ ok: boolean; error?: string }> {
+    const r = await fetch(this.url('/api/telegram/edit'), {
+      method: 'POST',
+      headers: this.headers(),
+      body: JSON.stringify({ message_id: messageId, ...opts }),
+    });
+    const j = (await r.json().catch(() => ({}))) as any;
     return { ok: !!j.ok, error: j.error };
   }
 
@@ -94,6 +105,51 @@ export class TelegramGatewayClient {
   /** Gateway status. */
   async status(): Promise<{ configured: boolean; active: string | null; subscriptions: { agent_id: string; callback_url?: string }[] }> {
     const r = await fetch(this.url('/api/telegram/status'), { headers: this.headers() });
+    return (await r.json().catch(() => ({}))) as any;
+  }
+
+  // --- 決策/核准 API ----------------------------------------------------------
+
+  /** 建立「批准/駁回」請求，發送到 Telegram，結果回傳 callback_url 或可輪詢。 */
+  async askApprove(opts: { text: string; description?: string; callback_url?: string; correlation_id?: string; metadata?: unknown; timeout_sec?: number; approve_label?: string; reject_label?: string }): Promise<any> {
+    return this.decision({ type: 'approve', ...opts });
+  }
+
+  /** 建立單選請求。options: [{key,label}] */
+  async askPick(opts: { text: string; options: { key: string; label: string }[]; description?: string; callback_url?: string; correlation_id?: string; metadata?: unknown; timeout_sec?: number }): Promise<any> {
+    return this.decision({ type: 'pick', ...opts });
+  }
+
+  /** 建立多選請求（可勾選多項後送出）。options: [{key,label}] */
+  async askMulti(opts: { text: string; options: { key: string; label: string }[]; description?: string; callback_url?: string; correlation_id?: string; metadata?: unknown; timeout_sec?: number; submit_label?: string; cancel_label?: string }): Promise<any> {
+    return this.decision({ type: 'multi', ...opts });
+  }
+
+  /** 建立決策請求（通用）。 */
+  async decision(body: Record<string, unknown>): Promise<any> {
+    const r = await fetch(this.url('/api/telegram/decisions'), {
+      method: 'POST',
+      headers: this.headers(),
+      body: JSON.stringify({ agent_id: this.opts.agentId, callback_url: (this.opts as any).callbackUrl, ...body }),
+    });
+    return (await r.json().catch(() => ({}))) as any;
+  }
+
+  /** 查詢決策結果。 */
+  async getDecision(id: string): Promise<any> {
+    const r = await fetch(this.url(`/api/telegram/decisions/${encodeURIComponent(id)}`), { headers: this.headers() });
+    return (await r.json().catch(() => ({}))) as any;
+  }
+
+  /** 列出本 agent 的決策。 */
+  async listDecisions(): Promise<any> {
+    const r = await fetch(this.url(`/api/telegram/decisions?agent=${encodeURIComponent(this.opts.agentId)}`), { headers: this.headers() });
+    return (await r.json().catch(() => ({}))) as any;
+  }
+
+  /** 取消決策。 */
+  async cancelDecision(id: string): Promise<any> {
+    const r = await fetch(this.url(`/api/telegram/decisions/${encodeURIComponent(id)}/cancel`), { method: 'POST', headers: this.headers() });
     return (await r.json().catch(() => ({}))) as any;
   }
 }

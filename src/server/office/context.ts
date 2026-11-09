@@ -16,6 +16,7 @@ import type { Ledger } from '../usage.js';
 import type { PlanLimitsReader } from '../limits.js';
 import type { Webhook } from '../webhook.js';
 import type { TelegramGateway } from '../telegram.js';
+import type { TelegramDecisions } from '../telegram-decisions.js';
 import type { Machine } from '../machine.js';
 import type { Building, FloorDef } from '../building.js';
 import type { Floor } from '../floor.js';
@@ -70,6 +71,7 @@ export interface BuildingServices {
   accountLimits: Map<string, { key: string; reader: PlanLimitsReader }>;
   webhook: Webhook;
   telegram: TelegramGateway;
+  telegramDecisions: TelegramDecisions;
   machine: Machine;
   /** Whose plan `c` sees: their own, on an account with its own Claude sign-in; else the office's. */
   limitsOf(c: Client): PlanLimitsReader;
